@@ -1,0 +1,48 @@
+1:startseq man in black shirt and hat is standing on the street endseq
+2:startseq the man is sitting on the water endseq
+3:startseq man in red shirt is standing on the beach endseq
+4:startseq two people are sitting on the street endseq
+5:startseq man in black shirt is standing on the street endseq
+6:startseq dog is running through the snow endseq
+7:startseq man in black shirt and black shirt and black shirt and black shirt and black hat and woman in black and black and black and white and white and white and white and white and
+8:startseq man in blue shirt is jumping on the street endseq
+9:startseq two children are sitting on the slide endseq
+10:startseq man in bikini and bikini is standing on the beach endseq
+11:startseq man in red shirt is walking down the street endseq
+12:startseq man in blue shirt is jumping into the water endseq
+13:startseq snowboarder is riding down the snow endseq
+14:startseq people are standing on the street endseq
+15:startseq the dog is jumping over the grass endseq
+16:startseq two people are standing on the steps endseq
+17:startseq man in black shirt and black shirt and black shirt and woman in black shirt and black shirt and black shirt and black shirt and woman are standing on the street endseq
+18:startseq man in red shirt is standing on the beach endseq
+19:startseq man in red jacket is skiing down snowy hill endseq
+20:startseq two children are sitting on the bench endseq
+22:startseq two dogs are running through the grass endseq
+23:startseq man in red shirt is standing on the street endseq
+24:startseq man in blue shirt is jumping on the street endseq
+25:startseq dog is running through the snow endseq
+26:startseq man is standing on the mountain endseq
+27:startseq man in red jacket is standing on the beach endseq
+28:startseq man in black shirt and black shirt and black shirt and black shirt and woman are sitting on the street endseq
+29:startseq two dogs are running through the grass endseq
+30:startseq little girl in blue shirt is jumping on the sidewalk endseq
+31:startseq two dogs are running through the grass endseq
+32:startseq young girl in blue shirt is running on the beach endseq
+33:startseq group of people are sitting on the ground endseq
+34:startseq group of people are playing in the air endseq
+35:startseq man in red shirt is jumping into the air endseq
+36:startseq dog is running through the grass endseq
+37:startseq dog is running through the grass endseq
+38:startseq woman in black shirt and black shirt and black shirt and woman in black and black and black and black and black and white and white and white and white and white and white and
+39:startseq man in red shirt is riding bike on the dirt path endseq
+40:startseq boy in red shirt is jumping on the ground endseq
+41:startseq man is standing on rock endseq
+42:startseq two children are sitting in the snow endseq
+43:startseq dog is running through the water endseq
+44:startseq two children are playing in the water endseq
+45:startseq man in red shirt and black shirt and black shirt and black shirt and black shirt and woman are standing on the street endseq
+46:startseq young boy in blue shirt is jumping into the pool endseq
+47:startseq man in black shirt and white shirt is standing on the street endseq
+49:startseq group of people are standing on the beach endseq
+50:startseq man in blue shirt is standing on the water endseq
