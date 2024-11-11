@@ -2,6 +2,8 @@
 Dlaczego Transfer learning?
 Poniewaz wymaga on znacznie mniej mocy obliczeniowej w porównaniu do konwencjonalnego własnoręcznie zrobionego CNN + DNN, umożliwiajac znacznie lepszą ekstrakcję cech.
 
+Automatyczne generowanie opisów stanowi połączenie dwóch kluczowych dziedzin sztucznej inteligencji: widzenia komputerowego i przetwarzania języka naturalnego. Dotychczasowe podejścia dzielą się na odgórne, rozpoczynające się od ogólnej interpretacji obrazu, którą następnie przekształca się w słowa, oraz oddolne, zaczynające od doboru słów opisujących różne aspekty obrazu, które są następnie ze sobą łączone.
+
 ## first
 ./flickr8k/archive/first
 
@@ -20,6 +22,7 @@ Stworzenie wlasniego modelu, dluzszego ale płytkiego
 7h
 # fifth
 Tak samo jak w poprzednim, ale zwiększenie długości i zwiększenie szerokości
+22h
 
 
 # Opis działania
@@ -35,10 +38,34 @@ Przetestowanie sieci z Internetu w celu obrania punktu startowego, oraz sprawdze
 | fifth | 13.087.781 | VGG16 (4K) |
 
 # Wykresy
+## fifth
+**Złożoność modelu**: Model ma skomplikowaną architekturę, z wieloma warstwami LSTM, warstwami uwagi (multi-head attention) i warstwami dense. Choć takie modele są potężne, mogą wymagać większej ilości danych lub bardziej precyzyjnego dostrajania, aby dobrze generalizować. Jeśli zbiór danych nie jest wystarczająco duży lub zróżnicowany, ta złożoność może prowadzić do przeuczenia, gdzie model dobrze radzi sobie na danych treningowych, ale gorzej na danych walidacyjnych.
 
+**Przeuczenie (overfitting)**: Wygląda na to, że model jest przeuczony, biorąc pod uwagę różnicę między stratą treningową a walidacyjną. Strata treningowa spada systematycznie, podczas gdy strata walidacyjna przestaje spadać lub nawet się waha, co oznacza, że model uczy się na pamięć danych treningowych, zamiast dobrze generalizować na nieznane dane. Pomóc może zastosowanie technik regularizacji, takich jak zwiększenie dropout, uproszczenie architektury modelu lub rozszerzenie zbioru danych.
+
+**Współczynnik uczenia i optymalizator**: Używamy optymalizatora Adam, który zazwyczaj sprawdza się dobrze, ale może wymagać dostrojenia. Callback ReduceLROnPlateau obniża współczynnik uczenia, ale początkowy współczynnik może być nadal zbyt wysoki. Możesz spróbować z niższym początkowym współczynnikiem uczenia (np. 1e-4 lub niższym) i sprawdzić, czy poprawia to stabilność straty walidacyjnej.
+
+**Jakość danych i przetwarzanie wstępne**: W zadaniach generowania podpisów do obrazów jakość i spójność cech obrazów oraz podpisów są kluczowe. Upewnij się, że podpisy są konsekwentnie przetworzone, a cechy obrazów są prawidłowo wyodrębnione. Każdy szum lub niespójność w danych może negatywnie wpłynąć na zdolność modelu do efektywnego uczenia się.
+
+**Rozmiar słownika i wypełnianie (padding)**: Duży słownik i długie podpisy mogą prowadzić do danych o wysokiej wymiarowości, co utrudnia naukę modelu. Sprawdź, czy można zmniejszyć słownik, eliminując bardzo rzadkie słowa lub stosując lematyzację. Upewnij się też, że wypełnianie (padding) jest prawidłowo obsługiwane, ponieważ nieprawidłowe wypełnianie może dodatkowo utrudniać trening.
+
+**Model ekstrakcji cech (VGG16)**: Model ekstrakcji cech (VGG16) może nie być optymalny do przechwytywania cech obrazu w tym zadaniu. Możemy spróbować użyć innych architektur, takich jak EfficientNet lub ResNet, które mogą lepiej reprezentować obrazy w zadaniach generowania podpisów.
+
+## third
+Obraz w archiwum trzecim wykres strat modelu (loss) w funkcji liczby epok treningowych, po zmniejszeniu złożoności modelu sześciokrotnie w porównaniu z piątym ostatnim modelem. Spójrzmy na ten wykres:
+
+    - Strata treningowa (Training Loss) - Niebieska linia wciąż spada, choć wolniej niż na wykresie z poprzednim modelem. To sugeruje, że mniejszy model nadal uczy się, ale już wolniej zmniejsza swoją stratę, co może wskazywać na ograniczenie jego zdolności do pełnego odwzorowania skomplikowanych relacji w danych.
+
+    - Strata walidacyjna (Validation Loss) - Pomarańczowa linia pozostaje stabilna lub waha się na określonym poziomie, co może sugerować mniejsze przeuczenie w porównaniu do poprzedniego wykresu, ale też brak poprawy w zdolności generalizacji.
+
+Wnioski:
+
+Zmniejszenie modelu wydaje się pomóc w stabilizacji straty walidacyjnej, ale może być zbyt radykalne, skoro strata walidacyjna przestała spadać lub osiągnęła plateau. Być może warto spróbować z modelem o pośredniej złożoności lub z dostrojeniem hiperparametrów, jak:
+
+    Dodanie dropout na poziomie umiarkowanym, eksperymentowanie z mniejszym początkowym współczynnikiem uczenia, aby model uczył się wolniej, ale być może bardziej efektywnie.
 
 # Warstwy
-- embedding -  Warstwa embedding zamienia tokeny (identyfikatory słów) na wektory liczbowe, które reprezentują semantyczne znaczenie słów. Przykładowo, słowa o podobnym znaczeniu mają podobne wektory. Dzięki temu model może lepiej uchwycić relacje między słowami oraz ich znaczenie. Dla modelu generującego opisy obrazów ważne jest, aby potrafił rozpoznawać semantyczne powiązania między słowami, co wpływa na spójność i sens wygenerowanych zdań. Warstwa embedding mapuje każdy element wejściowy (np. każde słowo) do wektora o niższym wymiarze, który przechowuje informację o relacjach między różnymi elementami. Na przykład słowa, które są ze sobą powiązane znaczeniowo, będą miały podobne reprezentacje wektorowe. Embedding jest kluczowym komponentem w przetwarzaniu języka naturalnego, gdzie każdy token (np. słowo) jest zamieniany na wektor liczbowy. Dzięki temu sieci neuronowe mogą lepiej uczyć się kontekstu i znaczenia.
+- embedding -  Warstwa embedding przekształca tokeny (czyli identyfikatory słów) w wektory liczbowe, które oddają ich semantyczne znaczenie. Na przykład, słowa o zbliżonym znaczeniu otrzymują podobne wektory, co pozwala modelowi lepiej uchwycić wzajemne relacje między słowami i ich znaczenie. W modelach generujących opisy obrazów istotne jest rozpoznawanie semantycznych powiązań między słowami, co wpływa na spójność i logikę generowanych zdań. Warstwa embedding odwzorowuje każdy element wejściowy (słowo) na wektor o niższym wymiarze, który przechowuje informacje o relacjach między różnymi elementami. Dzięki temu słowa powiązane znaczeniowo otrzymują podobne reprezentacje wektorowe. Embedding stanowi znaczący poizom przetwarzania w języku naturalnym, umożliwiając sieciom neuronowym skuteczniejsze rozpoznawanie kontekstu i znaczenia.
 **Zalety**: Pozwala na reprezentowanie słów i innych elementów w sposób numeryczny, co ułatwia ich dalsze przetwarzanie. Przyspiesza trening i pozwala na lepsze zrozumienie danych sekwencyjnych.
 **Wady**: Wymaga odpowiedniego doboru wymiaru przestrzeni osadzania. Źle wytrenowane embeddings mogą pogorszyć wyniki modelu.
 
