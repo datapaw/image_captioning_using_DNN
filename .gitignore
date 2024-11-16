@@ -6,3 +6,4 @@ flickr8k/train.py
 flickr8k/dataset/
 flickr8k/archive/fifth/VGG16_model.keras
 flickr8k/archive/sixth/VGG16_model.keras
+flickr8k/archive/transformer/model
