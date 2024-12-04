@@ -1,5 +1,5 @@
 flickr30k
-flickr8k/train_vit_gpt2.py
+flickr8k/transformer.py
 flickr8k/train_enhanced.ipynb
 flickr8k/train5.py
 flickr8k/train6.py

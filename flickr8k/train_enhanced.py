@@ -1,303 +1,174 @@
+import os
 import numpy as np
 import pandas as pd
-import os
-import tensorflow as tf
-from tqdm import tqdm
-from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from tensorflow.keras.utils import Sequence
 from tensorflow.keras.preprocessing.text import Tokenizer
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from tensorflow.keras.utils import to_categorical, Sequence
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import (Dense, Dropout, Embedding, LSTM, Input, concatenate,
-                                     GlobalAveragePooling2D, BatchNormalization)
-from tensorflow.keras.applications import DenseNet201, VGG16
+from tensorflow.keras.layers import (
+    Input, Dense, Embedding, Bidirectional, LSTM, Dropout, BatchNormalization,
+    MultiHeadAttention, Concatenate, Add, Reshape
+)
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import (ModelCheckpoint, EarlyStopping, ReduceLROnPlateau,
-                                        CSVLogger, TensorBoard)
 import matplotlib.pyplot as plt
-import seaborn as sns
-import warnings
-from textwrap import wrap
-from pathlib import Path
+from tqdm import tqdm
 import json
+import warnings
 
-# Set display preferences
-plt.rcParams['font.size'] = 12
-sns.set_style("dark")
 warnings.filterwarnings('ignore')
 
 #################################
-#      Configuration            #
+#       Utility Functions       #
 #################################
 
-# Dataset paths
-DATASET_PATH = Path('./dataset')
-IMAGE_PATH = DATASET_PATH / 'Images'
-CAPTIONS_PATH = DATASET_PATH / 'captions.txt'
-
-# Model hyperparameters
-IMG_SIZE = 224
-BATCH_SIZE = 64
-EPOCHS = 50
-EMBEDDING_DIM = 128
-LSTM_UNITS = 128
-DROPOUT_RATE = 0.5
-LEARNING_RATE = 0.0005
-
-# Choose model architecture
-# TOCHANGE
-FEATURE_EXTRACTOR = "DenseNet201"
-
-# Define paths for saved models and logs
-MODEL_PATH = Path("saved_models")
-MODEL_PATH.mkdir(exist_ok=True)
-LOG_PATH = Path("logs")
-LOG_PATH.mkdir(exist_ok=True)
-
-#################################
-#       Data Loading            #
-#################################
-
-print("Loading and preparing dataset...")
-
-# Load captions
-data = pd.read_csv(CAPTIONS_PATH)
-
-# Define image loading function
-def read_image(path, img_size=IMG_SIZE):
-    img = load_img(path, color_mode='rgb', target_size=(img_size, img_size))
-    img = img_to_array(img) / 255.0
-    return img
-
-# Display sample images
-def display_images(temp_df):
-    temp_df = temp_df.reset_index(drop=True)
-    plt.figure(figsize=(20, 20))
-    for i in range(15):
-        plt.subplot(5, 5, i + 1)
-        plt.subplots_adjust(hspace=0.7, wspace=0.3)
-        image = read_image(f"{IMAGE_PATH}/{temp_df.image[i]}")
-        plt.imshow(image)
-        plt.title("\n".join(wrap(temp_df.caption[i], 20)))
-        plt.axis("off")
-
-display_images(data.sample(15))
-
-#################################
-#    Text Preprocessing         #
-#################################
-
-# Clean and prepare text data
-def text_preprocessing(data):
-    data['caption'] = data['caption'].str.lower().replace("[^a-z\s]", " ", regex=True).str.strip()
-    data['caption'] = data['caption'].apply(lambda x: "startseq " + " ".join(word for word in x.split() if len(word) > 1) + " endseq")
+def load_dataset(image_dir, captions_file):
+    """Load dataset of image paths and captions."""
+    data = pd.read_csv(captions_file)
+    data['image'] = data['image'].apply(lambda x: os.path.join(image_dir, x))
     return data
 
-# Apply text preprocessing to captions
-data = text_preprocessing(data)
-captions = data['caption'].tolist()
+def preprocess_captions(data):
+    """Preprocess text captions."""
+    data['caption'] = (
+        data['caption'].str.lower()
+        .str.replace(r'[^a-z\s]', '', regex=True)  # Remove special characters
+        .str.replace(r'\s+', ' ', regex=True)    # Remove extra spaces
+        .str.strip()
+    )
+    data['caption'] = "startseq " + data['caption'] + " endseq"
+    return data
 
-# Tokenize text data for model input
-tokenizer = Tokenizer()
-tokenizer.fit_on_texts(captions)
-vocab_size = len(tokenizer.word_index) + 1
-max_length = max(len(caption.split()) for caption in captions)
+def tokenize_captions(data, max_vocab_size=None):
+    """Tokenize text captions."""
+    tokenizer = Tokenizer(num_words=max_vocab_size)
+    tokenizer.fit_on_texts(data['caption'])
+    vocab_size = len(tokenizer.word_index) + 1
+    max_length = max(data['caption'].apply(lambda x: len(x.split())))
+    return tokenizer, vocab_size, max_length
 
-# Save tokenizer for later use
-with open(MODEL_PATH / 'tokenizer.json', 'w') as f:
-    f.write(tokenizer.to_json())
-
-#################################
-#   Train-Validation Split      #
-#################################
-
-images = data['image'].unique().tolist()
-split_index = round(0.85 * len(images))
-train_images, val_images = images[:split_index], images[split_index:]
-
-train = data[data['image'].isin(train_images)].reset_index(drop=True)
-test = data[data['image'].isin(val_images)].reset_index(drop=True)
-
-#################################
-#   Feature Extraction          #
-#################################
-# TOCHANGE
-
-def build_feature_extractor(model_name='DenseNet201'):
-    models = {
-        "DenseNet201": DenseNet201,
-        "VGG16": VGG16
-    }
-    base_model = models[model_name](weights='imagenet', include_top=False, input_shape=(IMG_SIZE, IMG_SIZE, 3))
-    for layer in base_model.layers[:-10]:  # Unfreeze last few layers
-        layer.trainable = False
-    return Model(inputs=base_model.input, outputs=GlobalAveragePooling2D()(base_model.output))
-
-print(f"Extracting features using {FEATURE_EXTRACTOR}...")
-fe = build_feature_extractor(FEATURE_EXTRACTOR)
-features = {}
-for image in tqdm(data['image'].unique().tolist()):
-    img = load_img(os.path.join(IMAGE_PATH, image), target_size=(IMG_SIZE, IMG_SIZE))
-    img = img_to_array(img) / 255.0
-    img = np.expand_dims(img, axis=0)
-    features[image] = fe.predict(img, verbose=0)
+def extract_features(image_paths, model, target_size=(224, 224)):
+    """Extract image features using pre-trained model."""
+    features = {}
+    for img_path in tqdm(image_paths, desc="Extracting Features"):
+        img = load_img(img_path, target_size=target_size)
+        img = img_to_array(img) / 255.0
+        img = np.expand_dims(img, axis=0)
+        feature = model.predict(img, verbose=0)
+        features[img_path] = feature
+    return features
 
 #################################
-#  Data Generator Definition    #
+#         Model Creation        #
 #################################
 
-class CustomDataGenerator(Sequence):
-    def __init__(self, df, X_col, y_col, batch_size, directory, tokenizer, 
-                 vocab_size, max_length, features, shuffle=True):
-        self.df = df.copy()
-        self.X_col = X_col
-        self.y_col = y_col
-        self.directory = directory
-        self.batch_size = batch_size
-        self.tokenizer = tokenizer
-        self.vocab_size = vocab_size
-        self.max_length = max_length
-        self.features = features
-        self.shuffle = shuffle
-        self.n = len(self.df)
-        
-    def on_epoch_end(self):
-        if self.shuffle:
-            self.df = self.df.sample(frac=1).reset_index(drop=True)
-    
-    def __len__(self):
-        return self.n // self.batch_size
-    
-    def __getitem__(self, index):
-        batch = self.df.iloc[index * self.batch_size:(index + 1) * self.batch_size, :]
-        X1, X2, y = self.__get_data(batch)        
-        return (X1, X2), y
-    
-    def __get_data(self, batch):
-        X1, X2, y = [], [], []
-        
-        images = batch[self.X_col].tolist()
-        for image in images:
-            feature = self.features[image][0]
-            captions = batch.loc[batch[self.X_col] == image, self.y_col].tolist()
-            for caption in captions:
-                seq = self.tokenizer.texts_to_sequences([caption])[0]
-                for i in range(1, len(seq)):
-                    in_seq, out_seq = seq[:i], seq[i]
+def build_model(vocab_size, max_length, feature_dim=512):
+    """Build the image captioning model."""
+    # Image feature input
+    img_input = Input(shape=(feature_dim,), name="Image_Input")
+    img_features = Dense(256, activation="relu")(img_input)
+    img_features = BatchNormalization()(img_features)
+    img_features = Dropout(0.2)(img_features)
+
+    # Text input
+    text_input = Input(shape=(max_length,), name="Text_Input")
+    text_features = Embedding(vocab_size, 256)(text_input)
+    text_features = Bidirectional(LSTM(256, return_sequences=True))(text_features)
+    attention_output = MultiHeadAttention(num_heads=4, key_dim=64)(text_features, text_features)
+
+    # Merge image and text features
+    combined_features = Concatenate()([img_features, attention_output])
+    lstm_output = LSTM(256)(combined_features)
+
+    # Dense layers
+    dense_output = Dense(256, activation="relu")(lstm_output)
+    dense_output = Dropout(0.3)(dense_output)
+    final_output = Dense(vocab_size, activation="softmax")(dense_output)
+
+    # Define model
+    model = Model(inputs=[img_input, text_input], outputs=final_output)
+    model.compile(loss="categorical_crossentropy", optimizer=Adam(learning_rate=0.001))
+    return model
+
+#################################
+#         Training Setup        #
+#################################
+
+def create_generators(data, tokenizer, max_length, features, batch_size=32):
+    """Create data generators for training and validation."""
+    class CustomDataGenerator(Sequence):
+        def __init__(self, data, features, tokenizer, batch_size, max_length, vocab_size):
+            self.data = data
+            self.features = features
+            self.tokenizer = tokenizer
+            self.batch_size = batch_size
+            self.max_length = max_length
+            self.vocab_size = vocab_size
+
+        def __len__(self):
+            return len(self.data) // self.batch_size
+
+        def __getitem__(self, idx):
+            batch = self.data.iloc[idx * self.batch_size:(idx + 1) * self.batch_size]
+            X_img, X_seq, y = [], [], []
+            for _, row in batch.iterrows():
+                feature = self.features[row['image']][0]
+                caption = self.tokenizer.texts_to_sequences([row['caption']])[0]
+                for i in range(1, len(caption)):
+                    in_seq, out_seq = caption[:i], caption[i]
                     in_seq = pad_sequences([in_seq], maxlen=self.max_length)[0]
-                    out_seq = to_categorical([out_seq], num_classes=self.vocab_size)[0]
-                    X1.append(feature)
-                    X2.append(in_seq)
+                    out_seq = np.zeros(self.vocab_size)
+                    out_seq[out_seq] = 1
+                    X_img.append(feature)
+                    X_seq.append(in_seq)
                     y.append(out_seq)
-            
-        return np.array(X1), np.array(X2), np.array(y)
+            return [np.array(X_img), np.array(X_seq)], np.array(y)
+
+    generator = CustomDataGenerator(data, features, tokenizer, batch_size, max_length, vocab_size)
+    return generator
 
 #################################
-#  Model Architecture Setup     #
+#           Training            #
 #################################
 
-print("Building model...")
+# Configuration
+IMAGE_DIR = "./dataset/Images"
+CAPTIONS_FILE = "./dataset/captions.txt"
+BATCH_SIZE = 64
+EPOCHS = 50
 
-# Define the model architecture
-input1 = Input(shape=(fe.output_shape[1],))
-input2 = Input(shape=(max_length,))
+# Load and preprocess data
+data = load_dataset(IMAGE_DIR, CAPTIONS_FILE)
+data = preprocess_captions(data)
+tokenizer, vocab_size, max_length = tokenize_captions(data)
 
-img_features = Dense(128, activation='relu')(input1)
-img_features = BatchNormalization()(img_features)
-img_features = Dropout(DROPOUT_RATE)(img_features)
+# Split dataset
+image_files = data['image'].unique()
+split_idx = int(len(image_files) * 0.8)
+train_files = image_files[:split_idx]
+val_files = image_files[split_idx:]
 
-sentence_features = Embedding(vocab_size, EMBEDDING_DIM, mask_zero=True)(input2)
-sentence_features = LSTM(LSTM_UNITS, dropout=0.3, recurrent_dropout=0.3, return_sequences=True)(sentence_features)
-sentence_features = LSTM(LSTM_UNITS, dropout=0.3, recurrent_dropout=0.3)(sentence_features)
+train_data = data[data['image'].isin(train_files)]
+val_data = data[data['image'].isin(val_files)]
 
-x = concatenate([img_features, sentence_features])
-x = Dense(128, activation='relu')(x)
-x = Dropout(DROPOUT_RATE)(x)
-output = Dense(vocab_size, activation='softmax')(x)
+# Feature extraction
+pretrained_model = VGG16(include_top=False, pooling="avg")
+features = extract_features(image_files, pretrained_model)
 
-caption_model = Model(inputs=[input1, input2], outputs=output)
-optimizer = Adam(learning_rate=LEARNING_RATE)
-caption_model.compile(loss='categorical_crossentropy', optimizer=optimizer)
-caption_model.summary()
+# Generators
+train_generator = create_generators(train_data, tokenizer, max_length, features, BATCH_SIZE)
+val_generator = create_generators(val_data, tokenizer, max_length, features, BATCH_SIZE)
 
-#################################
-#       Data Generators         #
-#################################
+# Model
+model = build_model(vocab_size, max_length)
 
-train_generator = CustomDataGenerator(train, 'image', 'caption', BATCH_SIZE, IMAGE_PATH, tokenizer, vocab_size, max_length, features)
-validation_generator = CustomDataGenerator(test, 'image', 'caption', BATCH_SIZE, IMAGE_PATH, tokenizer, vocab_size, max_length, features)
-
-#################################
-#   Training and Callbacks      #
-#################################
-
-print("Training model...")
-# TOCHANGE
+# Callbacks
 callbacks = [
-    ModelCheckpoint(MODEL_PATH / "best_model.keras", monitor="val_loss", mode="min", save_best_only=True, verbose=1),
-    EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1),
-    ReduceLROnPlateau(monitor='val_loss', patience=2, factor=0.5, min_lr=1e-7, verbose=1),
-    CSVLogger(LOG_PATH / 'training_log.csv', append=True),
-    TensorBoard(log_dir=LOG_PATH)
+    ModelCheckpoint("best_model.h5", save_best_only=True),
+    EarlyStopping(patience=5, restore_best_weights=True),
+    ReduceLROnPlateau(factor=0.2, patience=3)
 ]
 
-history = caption_model.fit(
-    train_generator,
-    epochs=EPOCHS,
-    validation_data=validation_generator,
-    callbacks=callbacks
-)
-
-#################################
-#   Plot Loss Curves            #
-#################################
-
-plt.figure(figsize=(12, 6))
-plt.plot(history.history['loss'], label='Training Loss')
-plt.plot(history.history['val_loss'], label='Validation Loss')
-plt.title('Loss Curves')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
-
-#################################
-#   Prediction and Evaluation   #
-#################################
-
-# Prediction functions for evaluation
-def idx_to_word(integer, tokenizer):
-    for word, index in tokenizer.word_index.items():
-        if index == integer:
-            return word
-    return None
-
-def predict_caption(model, image, tokenizer, max_length, features):
-    feature = features[image]
-    in_text = "startseq"
-    for _ in range(max_length):
-        sequence = tokenizer.texts_to_sequences([in_text])[0]
-        sequence = pad_sequences([sequence], max_length)
-        
-        y_pred = model.predict([feature, sequence])
-        y_pred = np.argmax(y_pred)
-        word = idx_to_word(y_pred, tokenizer)
-        if word is None:
-            break
-        in_text += " " + word
-        if word == "endseq":
-            break
-    return in_text
-
-# Test model predictions with sample images
-for i in range(10):
-    for image in test['image'].sample(5):
-        print("Image:", image)
-        plt.imshow(read_image(os.path.join(IMAGE_PATH, image)))
-        plt.axis("off")
-        plt.show()
-        
-        actual_caption = test[test['image'] == image]['caption'].values[0]
-        print("Actual Caption:", actual_caption)
-        print("Predicted Caption:", predict_caption(caption_model, image, tokenizer, max_length, features))
-        print("\n")
+# Train
+history = model.fit(train_generator, validation_data=val_generator, epochs=EPOCHS, callbacks=callbacks)
